@@ -609,6 +609,26 @@ function updateMissiles() {
     if (elapsed > MISSILE_BOOST_TIME) tr *= 1.5;
 
     m.angle += Math.sign(diff) * Math.min(Math.abs(diff), tr * dt * 60);
+
+    // Deflection toward nearby enemies — if missile passes close to an enemy, bend toward it
+    const DEFLECT_RADIUS = 45;
+    const DEFLECT_STRENGTH = 0.12; // radians per frame, strong pull
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      const edx = e.x - m.x;
+      const edy = e.y - m.y;
+      const eDist = Math.sqrt(edx * edx + edy * edy);
+      if (eDist < DEFLECT_RADIUS && eDist > e.hitRadius) {
+        const toEnemyAngle = Math.atan2(edy, edx);
+        let eDiff = toEnemyAngle - m.angle;
+        while (eDiff > Math.PI) eDiff -= Math.PI * 2;
+        while (eDiff < -Math.PI) eDiff += Math.PI * 2;
+        // Stronger pull the closer the missile is
+        const pull = DEFLECT_STRENGTH * (1 - eDist / DEFLECT_RADIUS) * dt * 60;
+        m.angle += Math.sign(eDiff) * Math.min(Math.abs(eDiff), pull);
+      }
+    }
+
     m.vx = Math.cos(m.angle) * m.speed;
     m.vy = Math.sin(m.angle) * m.speed;
 
@@ -926,7 +946,7 @@ function spawnWave() {
 function startGame() {
   state = 'PLAYING';
   score = 0;
-  lives = 3;
+  lives = 4;
   wave = 0;
   combo = 0;
   comboTimer = 0;
