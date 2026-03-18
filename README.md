@@ -4,6 +4,8 @@
 
 A browser-based arcade survival game where you pilot an unarmed jet, dodging homing missiles fired by enemy jets and maneuvering so the missiles destroy the enemies instead. The core fantasy: you're outgunned but never outsmarted.
 
+Play [here](https://missiledodge.srikardurgi.com/).
+
 **This project is fully vibe-coded with [Claude Code](https://claude.ai/claude-code) — every line of code was generated through AI-assisted development with zero hand-written code.**
 
 ## Play
