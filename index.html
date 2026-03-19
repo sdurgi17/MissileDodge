@@ -28,6 +28,7 @@ const COLORS = {
   missileTrail: '#ff8c00',
   uiText: '#ffffff',
   combo: '#ffd700',
+  decoy: '#ff44ff',
 };
 
 const FRICTION = 0.98;
@@ -43,6 +44,9 @@ const WAVE_BREATHER = 2000; // ms
 const NEAR_MISS_DIST = 20;
 const MISSILE_LIFETIME = 12000; // ms
 const MISSILE_BOOST_TIME = 8000; // ms
+const DECOY_COOLDOWN = 15000; // ms
+const DECOY_DURATION = 3000; // ms
+const DECOY_ATTRACT_RADIUS = 250; // px
 
 // --- Game Settings (easy mode as default) ---
 const GAME_SETTINGS = {
@@ -77,6 +81,7 @@ let shakeIntensity = 0;
 let shakeTimer = 0;
 
 let player, enemies, missiles, particles, textPopups, stars;
+let activeDecoy = null;
 let keys = {};
 
 // --- Resize ---
@@ -112,10 +117,17 @@ const touch = {
 };
 
 function getBoostCenter() { return { x: W - 70, y: H - 90 }; }
+function getDecoyCenter() { return { x: W - 70, y: H - 160 }; }
 function getPauseCenter() { return { x: W - 30, y: 30 }; }
 
 function isTouchInBoostArea(tx, ty) {
   const c = getBoostCenter();
+  const d = Math.sqrt((tx - c.x) ** 2 + (ty - c.y) ** 2);
+  return d < touch.BOOST_RADIUS + 15;
+}
+
+function isTouchInDecoyArea(tx, ty) {
+  const c = getDecoyCenter();
   const d = Math.sqrt((tx - c.x) ** 2 + (ty - c.y) ** 2);
   return d < touch.BOOST_RADIUS + 15;
 }
@@ -144,6 +156,13 @@ canvas.addEventListener('touchstart', e => {
       touch.boost.active = true;
       touch.boost.id = t.identifier;
       keys['Space'] = true;
+      continue;
+    }
+
+    // Decoy button
+    if (isTouchInDecoyArea(tx, ty)) {
+      keys['KeyF'] = true;
+      setTimeout(() => { keys['KeyF'] = false; }, 100);
       continue;
     }
 
@@ -247,6 +266,7 @@ function createPlayer() {
     invincible: false,
     invincibleTimer: 0,
     blinkOn: true,
+    decoyCooldown: 0,
   };
 }
 
@@ -286,6 +306,25 @@ function updatePlayer() {
     }
   }
   if (p.afterburnerCooldown > 0) p.afterburnerCooldown -= dt * 1000;
+
+  // Decoy
+  if (keys['KeyF'] && p.decoyCooldown <= 0 && !activeDecoy) {
+    activeDecoy = { x: p.x, y: p.y, life: DECOY_DURATION };
+    p.decoyCooldown = DECOY_COOLDOWN;
+    // Spawn burst of magenta particles
+    for (let i = 0; i < 15; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const spd2 = Math.random() * 2.5 + 0.5;
+      particles.push({
+        x: p.x, y: p.y,
+        vx: Math.cos(a) * spd2, vy: Math.sin(a) * spd2,
+        life: 500 + Math.random() * 300, maxLife: 800,
+        color: i < 5 ? '#ffffff' : COLORS.decoy,
+        size: Math.random() * 3 + 2,
+      });
+    }
+  }
+  if (p.decoyCooldown > 0) p.decoyCooldown -= dt * 1000;
 
   p.vx += ax * accel * dt * 60;
   p.vy += ay * accel * dt * 60;
@@ -607,14 +646,64 @@ function fireMissile(enemy) {
   }
 }
 
+function updateDecoy() {
+  if (!activeDecoy) return;
+  activeDecoy.life -= dt * 1000;
+  // Spawn pulsing glow particles
+  if (Math.random() < 0.6) {
+    const a = Math.random() * Math.PI * 2;
+    const spd = Math.random() * 0.8;
+    particles.push({
+      x: activeDecoy.x + (Math.random() - 0.5) * 10,
+      y: activeDecoy.y + (Math.random() - 0.5) * 10,
+      vx: Math.cos(a) * spd, vy: Math.sin(a) * spd,
+      life: 300 + Math.random() * 200, maxLife: 500,
+      color: Math.random() < 0.3 ? '#ffffff' : COLORS.decoy,
+      size: Math.random() * 3 + 1,
+    });
+  }
+  if (activeDecoy.life <= 0) {
+    // Fadeout burst
+    for (let i = 0; i < 8; i++) {
+      const a = Math.random() * Math.PI * 2;
+      particles.push({
+        x: activeDecoy.x, y: activeDecoy.y,
+        vx: Math.cos(a) * 1.5, vy: Math.sin(a) * 1.5,
+        life: 300, maxLife: 300,
+        color: COLORS.decoy, size: 2,
+      });
+    }
+    activeDecoy = null;
+  }
+}
+
 function updateMissiles() {
   for (const m of missiles) {
     m.life -= dt * 1000;
     if (m.life <= 0) { m.alive = false; continue; }
 
-    // Track player
-    const dx = player.x - m.x;
-    const dy = player.y - m.y;
+    // Determine tracking target (decoy if active and in range, otherwise player)
+    let targetX = player.x, targetY = player.y;
+    let trackingDecoy = false;
+    if (activeDecoy) {
+      const fdx = activeDecoy.x - m.x;
+      const fdy = activeDecoy.y - m.y;
+      const fDist = Math.sqrt(fdx * fdx + fdy * fdy);
+      if (fDist < DECOY_ATTRACT_RADIUS) {
+        targetX = activeDecoy.x;
+        targetY = activeDecoy.y;
+        trackingDecoy = true;
+        // Missile reaches decoy — destroy missile
+        if (fDist < 15) {
+          m.alive = false;
+          spawnSpark(m.x, m.y);
+          continue;
+        }
+      }
+    }
+
+    const dx = targetX - m.x;
+    const dy = targetY - m.y;
     const targetAngle = Math.atan2(dy, dx);
     let diff = targetAngle - m.angle;
     while (diff > Math.PI) diff -= Math.PI * 2;
@@ -972,6 +1061,7 @@ function startGame() {
   enemiesDestroyed = 0;
   highestCombo = 0;
   player = createPlayer();
+  activeDecoy = null;
   enemies = [];
   missiles = [];
   particles = [];
@@ -1022,20 +1112,50 @@ function drawHUD() {
   ctx.fillText(`WAVE ${wave}`, W - (isTouchDevice ? 60 : 20), 60);
 
 
-  // Afterburner cooldown
-  if (player.afterburnerCooldown > 0) {
+  // Ability indicators (top-left, below combo)
+  const abilityY = 95;
+  ctx.textAlign = 'left';
+
+  // Boost
+  ctx.font = 'bold 13px monospace';
+  const boostKey = isTouchDevice ? '' : '[SPACE] ';
+  if (player.afterburnerActive) {
+    ctx.fillStyle = COLORS.player;
+    ctx.fillText(boostKey + 'BOOST  ACTIVE', 20, abilityY);
+  } else if (player.afterburnerCooldown > 0) {
     const pct = 1 - player.afterburnerCooldown / AFTERBURNER_COOLDOWN;
-    ctx.strokeStyle = 'rgba(0,240,255,0.4)';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(player.x, player.y + 25, 10, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * pct);
-    ctx.stroke();
-  } else if (!player.afterburnerActive) {
-    // Ready indicator
-    ctx.fillStyle = 'rgba(0,240,255,0.3)';
-    ctx.font = '10px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('BOOST', player.x, player.y + 30);
+    ctx.fillStyle = '#555555';
+    ctx.fillText(boostKey + 'BOOST', 20, abilityY);
+    // Cooldown bar
+    const barX = boostKey ? 130 : 80;
+    ctx.fillStyle = 'rgba(0,240,255,0.15)';
+    ctx.fillRect(barX, abilityY - 10, 60, 12);
+    ctx.fillStyle = COLORS.player;
+    ctx.fillRect(barX, abilityY - 10, 60 * pct, 12);
+  } else {
+    ctx.fillStyle = COLORS.player;
+    ctx.fillText(boostKey + 'BOOST  READY', 20, abilityY);
+  }
+
+  // Decoy
+  const decoyY = abilityY + 20;
+  const decoyKey = isTouchDevice ? '' : '[F] ';
+  if (activeDecoy) {
+    ctx.fillStyle = COLORS.decoy;
+    ctx.fillText(decoyKey + 'DECOY  ACTIVE', 20, decoyY);
+  } else if (player.decoyCooldown > 0) {
+    const pct = 1 - player.decoyCooldown / DECOY_COOLDOWN;
+    ctx.fillStyle = '#555555';
+    ctx.fillText(decoyKey + 'DECOY', 20, decoyY);
+    // Cooldown bar
+    const barX = decoyKey ? 110 : 80;
+    ctx.fillStyle = 'rgba(255,68,255,0.15)';
+    ctx.fillRect(barX, decoyY - 10, 60, 12);
+    ctx.fillStyle = COLORS.decoy;
+    ctx.fillRect(barX, decoyY - 10, 60 * pct, 12);
+  } else {
+    ctx.fillStyle = COLORS.decoy;
+    ctx.fillText(decoyKey + 'DECOY  READY', 20, decoyY);
   }
 
   // Wave announcement
@@ -1130,6 +1250,34 @@ function drawTouchControls() {
   ctx.fillText('BOOST', bc.x, bc.y + 5);
   ctx.globalAlpha = 1;
 
+  // Decoy button
+  const fc = getDecoyCenter();
+  const decoyReady = player.decoyCooldown <= 0 && !activeDecoy;
+  const decoyOnCooldown = player.decoyCooldown > 0;
+
+  ctx.globalAlpha = 0.3;
+  ctx.strokeStyle = decoyReady ? COLORS.decoy : '#555555';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(fc.x, fc.y, touch.BOOST_RADIUS, 0, Math.PI * 2);
+  ctx.stroke();
+
+  if (decoyOnCooldown) {
+    const pct = 1 - player.decoyCooldown / DECOY_COOLDOWN;
+    ctx.strokeStyle = COLORS.decoy;
+    ctx.globalAlpha = 0.5;
+    ctx.beginPath();
+    ctx.arc(fc.x, fc.y, touch.BOOST_RADIUS, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * pct);
+    ctx.stroke();
+  }
+
+  ctx.globalAlpha = decoyReady ? 0.6 : 0.3;
+  ctx.fillStyle = COLORS.uiText;
+  ctx.font = 'bold 14px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('DECOY', fc.x, fc.y + 5);
+  ctx.globalAlpha = 1;
+
   // Pause button (top-right, offset from lives)
   const pc = getPauseCenter();
   ctx.globalAlpha = 0.3;
@@ -1183,9 +1331,9 @@ function drawMenu() {
   ctx.fillStyle = '#667788';
   ctx.font = '14px monospace';
   if (isTouchDevice) {
-    ctx.fillText('Drag to move    |    Tap BOOST for Afterburner', W / 2, H / 2 + 20);
+    ctx.fillText('Drag to move    |    Tap BOOST / DECOY', W / 2, H / 2 + 20);
   } else {
-    ctx.fillText('Arrow Keys / WASD to move    |    Space for Afterburner', W / 2, H / 2 + 20);
+    ctx.fillText('Arrow Keys / WASD to move    |    Space: Boost    F: Decoy', W / 2, H / 2 + 20);
     ctx.fillText('P / Escape to Pause', W / 2, H / 2 + 45);
   }
 
@@ -1292,6 +1440,7 @@ function gameLoop(time) {
   updateStars();
   updatePlayer();
   updateEnemies();
+  updateDecoy();
   updateMissiles();
   checkCollisions();
   updateParticles();
@@ -1336,6 +1485,32 @@ function drawGame() {
 
   // Missiles
   for (const m of missiles) drawMissile(m);
+
+  // Active decoy
+  if (activeDecoy) {
+    const pulse = 0.6 + Math.sin(Date.now() * 0.012) * 0.4;
+    // Outer glow
+    ctx.shadowColor = COLORS.decoy;
+    ctx.shadowBlur = 20 * pulse;
+    ctx.fillStyle = COLORS.decoy;
+    ctx.globalAlpha = 0.3 * pulse;
+    ctx.beginPath();
+    ctx.arc(activeDecoy.x, activeDecoy.y, 18 * pulse, 0, Math.PI * 2);
+    ctx.fill();
+    // Inner core
+    ctx.globalAlpha = 0.8;
+    ctx.beginPath();
+    ctx.arc(activeDecoy.x, activeDecoy.y, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+    // Attract radius hint (subtle ring)
+    ctx.strokeStyle = 'rgba(255,68,255,0.08)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(activeDecoy.x, activeDecoy.y, DECOY_ATTRACT_RADIUS, 0, Math.PI * 2);
+    ctx.stroke();
+  }
 
   // Player
   if (state !== 'GAME_OVER') drawPlayer();
