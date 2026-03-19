@@ -82,6 +82,11 @@ let shakeTimer = 0;
 
 let player, enemies, missiles, particles, textPopups, stars;
 let activeDecoy = null;
+let heartPickup = null;
+let heartSpawnTimer = 0;
+const HEART_SPAWN_INTERVAL = 45000; // ms
+const HEART_DURATION = 10000; // ms
+const HEART_PICKUP_RADIUS = 20;
 let keys = {};
 
 // --- Resize ---
@@ -677,6 +682,61 @@ function updateDecoy() {
   }
 }
 
+function updateHeartPickup() {
+  // Spawn timer
+  if (!heartPickup) {
+    heartSpawnTimer -= dt * 1000;
+    if (heartSpawnTimer <= 0) {
+      const margin = 60;
+      heartPickup = {
+        x: margin + Math.random() * (W - margin * 2),
+        y: margin + Math.random() * (H - margin * 2),
+        life: HEART_DURATION,
+      };
+    }
+  }
+  if (!heartPickup) return;
+
+  heartPickup.life -= dt * 1000;
+
+  // Check player collection
+  const dx = player.x - heartPickup.x;
+  const dy = player.y - heartPickup.y;
+  if (Math.sqrt(dx * dx + dy * dy) < HEART_PICKUP_RADIUS + player.hitRadius) {
+    lives++;
+    // Celebration particles
+    for (let i = 0; i < 12; i++) {
+      const a = Math.random() * Math.PI * 2;
+      particles.push({
+        x: heartPickup.x, y: heartPickup.y,
+        vx: Math.cos(a) * 2, vy: Math.sin(a) * 2,
+        life: 500, maxLife: 500,
+        color: i < 4 ? '#ffffff' : '#ff4466',
+        size: Math.random() * 3 + 2,
+      });
+    }
+    textPopups.push({ x: heartPickup.x, y: heartPickup.y - 15, text: '+1 LIFE', color: '#ff4466', life: 1200, maxLife: 1200 });
+    heartPickup = null;
+    heartSpawnTimer = HEART_SPAWN_INTERVAL;
+    return;
+  }
+
+  // Expire
+  if (heartPickup.life <= 0) {
+    heartPickup = null;
+    heartSpawnTimer = HEART_SPAWN_INTERVAL;
+  }
+}
+
+function drawHeart(x, y, size) {
+  ctx.beginPath();
+  const topY = y - size * 0.4;
+  ctx.moveTo(x, y + size * 0.6);
+  ctx.bezierCurveTo(x - size, y - size * 0.2, x - size * 0.5, topY - size * 0.5, x, topY + size * 0.1);
+  ctx.bezierCurveTo(x + size * 0.5, topY - size * 0.5, x + size, y - size * 0.2, x, y + size * 0.6);
+  ctx.closePath();
+}
+
 function updateMissiles() {
   for (const m of missiles) {
     m.life -= dt * 1000;
@@ -1062,6 +1122,8 @@ function startGame() {
   highestCombo = 0;
   player = createPlayer();
   activeDecoy = null;
+  heartPickup = null;
+  heartSpawnTimer = HEART_SPAWN_INTERVAL;
   enemies = [];
   missiles = [];
   particles = [];
@@ -1441,6 +1503,7 @@ function gameLoop(time) {
   updatePlayer();
   updateEnemies();
   updateDecoy();
+  updateHeartPickup();
   updateMissiles();
   checkCollisions();
   updateParticles();
@@ -1485,6 +1548,27 @@ function drawGame() {
 
   // Missiles
   for (const m of missiles) drawMissile(m);
+
+  // Heart pickup
+  if (heartPickup) {
+    const blink = Math.sin(Date.now() * 0.008) > 0;
+    if (blink) {
+      const fadeAlpha = heartPickup.life < 3000 ? (heartPickup.life / 3000) : 1;
+      ctx.globalAlpha = fadeAlpha;
+      // Glow
+      ctx.shadowColor = '#ff4466';
+      ctx.shadowBlur = 15 + Math.sin(Date.now() * 0.006) * 5;
+      ctx.fillStyle = '#ff4466';
+      drawHeart(heartPickup.x, heartPickup.y, 16);
+      ctx.fill();
+      // Inner highlight
+      ctx.fillStyle = '#ffaabb';
+      drawHeart(heartPickup.x, heartPickup.y, 9);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
+    }
+  }
 
   // Active decoy
   if (activeDecoy) {
