@@ -1,0 +1,16 @@
+name = "missile-dodge"
+compatibility_date = "2024-09-23"
+pages_build_output_dir = "."
+
+# D1 database for leaderboard scores
+# To set up production D1:
+# 1. Run: npx wrangler d1 create missile-dodge-db
+# 2. Copy the database_id from the output and paste it below
+# 3. Run: npx wrangler d1 migrations apply missile-dodge-db --remote
+# For local dev, the --d1=DB=missile-dodge-db flag in `npm run dev` auto-creates a local SQLite file.
+
+[[d1_databases]]
+binding = "DB"
+database_name = "missile-dodge-db"
+database_id = "1984350a-e3b0-4fcb-bf67-f1434e728def"
+migrations_dir = "migrations"

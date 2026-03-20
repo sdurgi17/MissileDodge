@@ -8,10 +8,42 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { overflow: hidden; background: #0a0e1a; touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 canvas { display: block; }
+#name-overlay {
+  display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 10;
+  justify-content: center; align-items: center; flex-direction: column; gap: 20px;
+}
+#name-overlay.active { display: flex; }
+#name-overlay::before {
+  content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(10,14,26,0.92); z-index: -1;
+}
+#name-overlay input {
+  background: rgba(10,14,26,0.95); border: 2px solid #00f0ff; color: #00f0ff;
+  font: bold 24px monospace; text-align: center; padding: 12px 20px; width: 320px; max-width: 80vw;
+  outline: none; border-radius: 4px; caret-color: #00f0ff;
+}
+#name-overlay input::placeholder { color: rgba(0,240,255,0.3); }
+#name-overlay input:focus { box-shadow: 0 0 20px rgba(0,240,255,0.3); }
+#name-overlay .name-label {
+  color: #00f0ff; font: bold 28px monospace; text-shadow: 0 0 15px rgba(0,240,255,0.5);
+}
+#name-overlay .name-hint { color: #667788; font: 14px monospace; }
+#name-overlay .name-start-btn {
+  background: transparent; border: 2px solid #00f0ff; color: #00f0ff;
+  font: bold 18px monospace; padding: 10px 40px; cursor: pointer; border-radius: 4px;
+  transition: all 0.2s;
+}
+#name-overlay .name-start-btn:hover { background: rgba(0,240,255,0.15); box-shadow: 0 0 15px rgba(0,240,255,0.3); }
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
+<div id="name-overlay">
+  <div class="name-label">ENTER YOUR CALLSIGN</div>
+  <input type="text" id="name-input" maxlength="20" placeholder="Pilot name..." autocomplete="off" />
+  <div class="name-hint">1-20 characters (letters, numbers, spaces)</div>
+  <button class="name-start-btn" id="name-start-btn">LAUNCH</button>
+</div>
 <script>
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -59,7 +91,7 @@ const GAME_SETTINGS = {
 
 // --- State ---
 let W, H;
-let state = 'MENU'; // MENU, PLAYING, PAUSED, GAME_OVER
+let state = 'MENU'; // MENU, NAME_ENTRY, PLAYING, PAUSED, GAME_OVER, LEADERBOARD
 let dt = 0;
 let lastTime = 0;
 let score = 0;
@@ -83,6 +115,13 @@ let shakeTimer = 0;
 let player, enemies, missiles, particles, textPopups, stars;
 let activeDecoy = null;
 let heartPickup = null;
+
+// --- Leaderboard ---
+let playerName = localStorage.getItem('missileDodgePlayerName') || '';
+let leaderboardData = null;
+let leaderboardLoading = false;
+let playerRank = null;
+let scoreSubmitted = false;
 let heartSpawnTimer = 0;
 const HEART_SPAWN_INTERVAL = 45000; // ms
 const HEART_DURATION = 10000; // ms
@@ -101,8 +140,9 @@ resize();
 window.addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'Enter') {
-    if (state === 'MENU') { startGame(); }
-    else if (state === 'GAME_OVER') { state = 'MENU'; }
+    if (state === 'MENU') { showNameEntry(); }
+    else if (state === 'GAME_OVER') { showLeaderboard(); }
+    else if (state === 'LEADERBOARD') { state = 'MENU'; }
   }
   if ((e.code === 'KeyP' || e.code === 'Escape') && state === 'PLAYING') state = 'PAUSED';
   else if ((e.code === 'KeyP' || e.code === 'Escape') && state === 'PAUSED') state = 'PLAYING';
@@ -147,10 +187,12 @@ canvas.addEventListener('touchstart', e => {
   for (const t of e.changedTouches) {
     const tx = t.clientX, ty = t.clientY;
 
-    // Menu — tap to start
-    if (state === 'MENU') { startGame(); return; }
-    // Game over — tap to go to menu
-    if (state === 'GAME_OVER') { state = 'MENU'; return; }
+    // Menu — tap to enter name
+    if (state === 'MENU') { showNameEntry(); return; }
+    // Game over — tap to show leaderboard
+    if (state === 'GAME_OVER') { showLeaderboard(); return; }
+    // Leaderboard — tap to go to menu
+    if (state === 'LEADERBOARD') { state = 'MENU'; return; }
 
     // Pause button
     if (state === 'PLAYING' && isTouchInPauseArea(tx, ty)) { state = 'PAUSED'; return; }
@@ -1108,6 +1150,77 @@ function spawnWave() {
   waveTimer = WAVE_DURATION;
 }
 
+// --- Name Entry & Leaderboard ---
+const nameOverlay = document.getElementById('name-overlay');
+const nameInput = document.getElementById('name-input');
+const nameStartBtn = document.getElementById('name-start-btn');
+
+// Prevent game keys from firing while typing
+nameInput.addEventListener('keydown', e => {
+  e.stopPropagation();
+  if (e.key === 'Enter') { confirmName(); }
+});
+nameStartBtn.addEventListener('click', confirmName);
+
+function showNameEntry() {
+  state = 'NAME_ENTRY';
+  nameInput.value = playerName;
+  nameOverlay.classList.add('active');
+  setTimeout(() => nameInput.focus(), 50);
+}
+
+function hideNameEntry() {
+  nameOverlay.classList.remove('active');
+}
+
+function confirmName() {
+  const val = nameInput.value.trim();
+  if (val.length < 1 || val.length > 20 || !/^[a-zA-Z0-9 ]+$/.test(val)) return;
+  playerName = val;
+  localStorage.setItem('missileDodgePlayerName', playerName);
+  hideNameEntry();
+  startGame();
+}
+
+async function submitScore() {
+  if (scoreSubmitted || !playerName) return;
+  scoreSubmitted = true;
+  try {
+    const res = await fetch('/api/scores', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: playerName,
+        score,
+        enemiesDestroyed,
+        highestCombo,
+        wavesSurvived: wave,
+      }),
+    });
+    const data = await res.json();
+    if (data.rank) playerRank = data.rank;
+  } catch (e) {
+    playerRank = null;
+  }
+}
+
+async function fetchLeaderboard() {
+  leaderboardLoading = true;
+  leaderboardData = null;
+  try {
+    const res = await fetch('/api/scores?limit=50');
+    leaderboardData = await res.json();
+  } catch (e) {
+    leaderboardData = [];
+  }
+  leaderboardLoading = false;
+}
+
+function showLeaderboard() {
+  state = 'LEADERBOARD';
+  fetchLeaderboard();
+}
+
 // --- Game State ---
 function startGame() {
   state = 'PLAYING';
@@ -1128,6 +1241,8 @@ function startGame() {
   missiles = [];
   particles = [];
   textPopups = [];
+  scoreSubmitted = false;
+  playerRank = null;
   inBreather = true;
   waveBreatherTimer = 1000;
 }
@@ -1138,6 +1253,7 @@ function gameOver() {
     highScore = score;
     setHighScore(highScore);
   }
+  submitScore();
 }
 
 // --- HUD ---
@@ -1454,20 +1570,115 @@ function drawGameOver() {
   ctx.fillText(`Highest Combo: x${highestCombo}`, W / 2, H / 2 + 45);
   ctx.fillText(`Waves Survived: ${wave}`, W / 2, H / 2 + 70);
 
+  let infoY = H / 2 + 100;
+
   if (score >= highScore && score > 0) {
     ctx.fillStyle = COLORS.combo;
     ctx.font = 'bold 22px monospace';
     ctx.shadowColor = COLORS.combo;
     ctx.shadowBlur = 10;
-    ctx.fillText('NEW HIGH SCORE!', W / 2, H / 2 + 110);
+    ctx.fillText('NEW HIGH SCORE!', W / 2, infoY);
     ctx.shadowBlur = 0;
+    infoY += 35;
+  }
+
+  if (playerRank) {
+    ctx.fillStyle = '#aabbcc';
+    ctx.font = '18px monospace';
+    ctx.fillText(`Global Rank: #${playerRank}`, W / 2, infoY);
+    infoY += 35;
   }
 
   const pulse = 0.5 + Math.sin(Date.now() * 0.004) * 0.5;
   ctx.globalAlpha = pulse;
   ctx.fillStyle = COLORS.uiText;
   ctx.font = 'bold 18px monospace';
-  ctx.fillText(isTouchDevice ? 'Tap to continue' : 'Press ENTER to continue', W / 2, H / 2 + 150);
+  ctx.fillText(isTouchDevice ? 'Tap for Leaderboard' : 'Press ENTER for Leaderboard', W / 2, infoY + 20);
+  ctx.globalAlpha = 1;
+}
+
+function drawLeaderboard() {
+  ctx.fillStyle = COLORS.bg;
+  ctx.fillRect(0, 0, W, H);
+  drawStars();
+
+  ctx.textAlign = 'center';
+
+  // Title
+  ctx.shadowColor = COLORS.player;
+  ctx.shadowBlur = 20;
+  ctx.fillStyle = COLORS.player;
+  ctx.font = 'bold 36px monospace';
+  ctx.fillText('LEADERBOARD', W / 2, 60);
+  ctx.shadowBlur = 0;
+
+  if (leaderboardLoading) {
+    ctx.fillStyle = '#667788';
+    ctx.font = '18px monospace';
+    ctx.fillText('Loading...', W / 2, H / 2);
+    return;
+  }
+
+  if (!leaderboardData || leaderboardData.length === 0) {
+    ctx.fillStyle = '#667788';
+    ctx.font = '18px monospace';
+    ctx.fillText('No scores yet. Be the first!', W / 2, H / 2);
+  } else {
+    // Table header
+    const startY = 100;
+    const rowH = 22;
+    const colRank = W / 2 - 220;
+    const colName = W / 2 - 140;
+    const colScore = W / 2 + 80;
+    const colWaves = W / 2 + 200;
+
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#556677';
+    ctx.font = 'bold 12px monospace';
+    ctx.fillText('RANK', colRank, startY);
+    ctx.fillText('PILOT', colName, startY);
+    ctx.textAlign = 'right';
+    ctx.fillText('SCORE', colScore, startY);
+    ctx.fillText('WAVES', colWaves, startY);
+
+    // Rows
+    const maxRows = Math.min(leaderboardData.length, Math.floor((H - startY - 80) / rowH));
+    let playerInList = false;
+
+    for (let i = 0; i < maxRows; i++) {
+      const entry = leaderboardData[i];
+      const y = startY + (i + 1) * rowH + 5;
+      const isPlayer = entry.name === playerName;
+      if (isPlayer) playerInList = true;
+
+      ctx.fillStyle = isPlayer ? COLORS.combo : (i < 3 ? '#ffffff' : '#aabbcc');
+      ctx.font = isPlayer ? 'bold 14px monospace' : '14px monospace';
+
+      ctx.textAlign = 'left';
+      ctx.fillText(`#${i + 1}`, colRank, y);
+      ctx.fillText(entry.name.length > 16 ? entry.name.slice(0, 15) + '…' : entry.name, colName, y);
+      ctx.textAlign = 'right';
+      ctx.fillText(entry.score.toLocaleString(), colScore, y);
+      ctx.fillText(entry.waves_survived.toString(), colWaves, y);
+    }
+
+    // Player rank if not in visible list
+    if (!playerInList && playerRank) {
+      const rankY = startY + (maxRows + 2) * rowH;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = COLORS.combo;
+      ctx.font = 'bold 16px monospace';
+      ctx.fillText(`YOUR RANK: #${playerRank}`, W / 2, rankY);
+    }
+  }
+
+  // Continue prompt
+  const pulse = 0.5 + Math.sin(Date.now() * 0.004) * 0.5;
+  ctx.globalAlpha = pulse;
+  ctx.textAlign = 'center';
+  ctx.fillStyle = COLORS.uiText;
+  ctx.font = 'bold 16px monospace';
+  ctx.fillText(isTouchDevice ? 'Tap to continue' : 'Press ENTER to continue', W / 2, H - 40);
   ctx.globalAlpha = 1;
 }
 
@@ -1478,7 +1689,7 @@ function gameLoop(time) {
   dt = Math.min((time - lastTime) / 1000, 0.05); // cap delta
   lastTime = time;
 
-  if (state === 'MENU') {
+  if (state === 'MENU' || state === 'NAME_ENTRY') {
     updateStars();
     drawMenu();
     return;
@@ -1488,6 +1699,12 @@ function gameLoop(time) {
     updateStars();
     updateParticles();
     drawGameOver();
+    return;
+  }
+
+  if (state === 'LEADERBOARD') {
+    updateStars();
+    drawLeaderboard();
     return;
   }
 

@@ -1,0 +1,11 @@
+{
+  "name": "missile-dodge",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "npx wrangler pages dev . --d1=DB=missile-dodge-db --port 8788"
+  },
+  "devDependencies": {
+    "wrangler": "^3.45.0"
+  }
+}
