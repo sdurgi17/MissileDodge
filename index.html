@@ -924,8 +924,9 @@ function checkCollisions() {
       }
     }
 
-    // Missile → Enemy
-    for (const e of enemies) {
+    // Missile → Enemy (3-second grace period after firing)
+    const missileAge = MISSILE_LIFETIME - m.life;
+    if (missileAge >= 3000) for (const e of enemies) {
       if (!e.alive) continue;
       const ed = Math.sqrt((m.x - e.x) ** 2 + (m.y - e.y) ** 2);
       if (ed < m.hitRadius + e.hitRadius) {
