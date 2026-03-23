@@ -8,6 +8,22 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { overflow: hidden; background: #0a0e1a; touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 canvas { display: block; }
+#mobile-block {
+  display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: #0a0e1a; z-index: 100;
+  justify-content: center; align-items: center; flex-direction: column; gap: 16px;
+  font-family: monospace; text-align: center; padding: 32px;
+}
+#mobile-block .mb-title {
+  color: #00f0ff; font-size: 28px; font-weight: bold; letter-spacing: 4px;
+  text-shadow: 0 0 15px rgba(0,240,255,0.5);
+}
+#mobile-block .mb-text { color: #667788; font-size: 15px; line-height: 1.6; }
+#mobile-block .mb-url { color: #4a5568; font-size: 13px; margin-top: 12px; }
+@media (max-width: 768px) {
+  #mobile-block { display: flex; }
+  canvas, #name-overlay { display: none !important; }
+}
 #name-overlay {
   display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 10;
   justify-content: center; align-items: center; flex-direction: column; gap: 20px;
@@ -37,6 +53,11 @@ canvas { display: block; }
 </style>
 </head>
 <body>
+<div id="mobile-block">
+  <div class="mb-title">MISSILE DODGE</div>
+  <div class="mb-text">This game requires a keyboard to play.<br>Please open on a desktop browser.</div>
+  <div class="mb-url">missiledodge.srikardurgi.com</div>
+</div>
 <canvas id="game"></canvas>
 <div id="name-overlay">
   <div class="name-label">ENTER YOUR CALLSIGN</div>
