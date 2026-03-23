@@ -1103,8 +1103,9 @@ function updateWaves() {
     return;
   }
 
+  const allEnemiesDead = enemies.length > 0 && enemies.filter(e => e.alive).length === 0;
   waveTimer -= dt * 1000;
-  if (waveTimer <= 0 && enemies.filter(e => e.alive).length === 0) {
+  if ((waveTimer <= 0 || allEnemiesDead) && enemies.filter(e => e.alive).length === 0) {
     // Next wave
     inBreather = true;
     waveBreatherTimer = WAVE_BREATHER;
