@@ -6,6 +6,12 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["wrangler", "pages", "dev", ".", "--d1=DB=missile-dodge-db", "--port", "8788"],
       "port": 8788
+    },
+    {
+      "name": "static",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8080"],
+      "port": 8080
     }
   ]
 }
